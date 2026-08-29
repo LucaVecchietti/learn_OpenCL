@@ -59,6 +59,19 @@ static void print_device_ulong_mb(cl_device_id device, cl_device_info param,
     }
 }
 
+static void print_device_ulong_kb(cl_device_id device, cl_device_info param,
+                                   const char *label)
+{
+    cl_ulong value;
+    cl_int err = clGetDeviceInfo(device, param, sizeof(value), &value, NULL);
+    if (err == CL_SUCCESS) {
+        printf("    %-28s: %llu KB\n", label,
+               (unsigned long long)(value / 1024));
+    } else {
+        printf("    %-28s: <errore query, codice %d>\n", label, err);
+    }
+}
+
 static const char *device_type_to_string(cl_device_type type)
 {
     if (type & CL_DEVICE_TYPE_GPU) return "GPU";
@@ -164,7 +177,7 @@ int main(void)
 
             print_device_ulong_mb(devices[d], CL_DEVICE_GLOBAL_MEM_SIZE,
                                    "Global memory");
-            print_device_ulong_mb(devices[d], CL_DEVICE_LOCAL_MEM_SIZE,
+            print_device_ulong_kb(devices[d], CL_DEVICE_LOCAL_MEM_SIZE,
                                    "Local memory");
             print_device_ulong_mb(devices[d], CL_DEVICE_MAX_MEM_ALLOC_SIZE,
                                    "Max mem alloc size");
