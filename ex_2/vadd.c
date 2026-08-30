@@ -167,8 +167,9 @@ int main(void)
      * lasciato a NULL per ora (decide il runtime). Lo controlleremo
      * esplicitamente più avanti quando parleremo di work-group sizing. */
     size_t global_size = VECTOR_SIZE;
+    size_t local_work_size = 64;    // parti of exercise 2.A
     err = clEnqueueNDRangeKernel(queue, kernel, 1, NULL,
-                                  &global_size, NULL, 0, NULL, NULL);
+                                  &global_size, &local_work_size, 0, NULL, NULL);
     check_error(err, "clEnqueueNDRangeKernel");
 
     /* Lettura bloccante del risultato: garantisce che tutto il lavoro
