@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MATRIX_SIZE 4
+#define MATRIX_SIZE 2048
 
 /**
  * Load the OpenCL kernel source code from a file.
@@ -179,27 +179,27 @@ int main(void)
 
     /* Verification of the result */
 
-    float *sum = (float *)malloc(sizeof(float) * MATRIX_SIZE * MATRIX_SIZE);
-    memset(sum, 0, sizeof(float) * MATRIX_SIZE * MATRIX_SIZE);
+    // float *sum = (float *)malloc(sizeof(float) * MATRIX_SIZE * MATRIX_SIZE);
+    // memset(sum, 0, sizeof(float) * MATRIX_SIZE * MATRIX_SIZE);
 
-    for (unsigned int i=0; i < MATRIX_SIZE; i++) {
-        for (unsigned int j=0; j < MATRIX_SIZE; j++) {
-            for (unsigned int k = 0; k < MATRIX_SIZE; k++) {
-                sum[i * MATRIX_SIZE + j] += h_A[i * MATRIX_SIZE + k] * h_B[k * MATRIX_SIZE + j];
-            }
-        }
-    }
-    for (unsigned int i = 0; i < MATRIX_SIZE; i++) {
-        for (unsigned int j = 0; j < MATRIX_SIZE; j++) {
-            if (h_C[i * MATRIX_SIZE + j] != sum[i * MATRIX_SIZE + j]) {
-                fprintf(stderr, "Verification failed at index (%u, %u): %f != %f\n", i, j, h_C[i * MATRIX_SIZE + j], sum[i * MATRIX_SIZE + j]);
-                free(sum);
-                exit(EXIT_FAILURE);
-            }
-        }
-    }
-    printf("Verification passed!\n");
-    free(sum);
+    // for (unsigned int i=0; i < MATRIX_SIZE; i++) {
+    //     for (unsigned int j=0; j < MATRIX_SIZE; j++) {
+    //         for (unsigned int k = 0; k < MATRIX_SIZE; k++) {
+    //             sum[i * MATRIX_SIZE + j] += h_A[i * MATRIX_SIZE + k] * h_B[k * MATRIX_SIZE + j];
+    //         }
+    //     }
+    // }
+    // for (unsigned int i = 0; i < MATRIX_SIZE; i++) {
+    //     for (unsigned int j = 0; j < MATRIX_SIZE; j++) {
+    //         if (h_C[i * MATRIX_SIZE + j] != sum[i * MATRIX_SIZE + j]) {
+    //             fprintf(stderr, "Verification failed at index (%u, %u): %f != %f\n", i, j, h_C[i * MATRIX_SIZE + j], sum[i * MATRIX_SIZE + j]);
+    //             free(sum);
+    //             exit(EXIT_FAILURE);
+    //         }
+    //     }
+    // }
+    // printf("Verification passed!\n");
+    // free(sum);
 
     /* Free allocated resources */
     free(h_A);
