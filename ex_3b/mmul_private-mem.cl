@@ -11,7 +11,7 @@
                                        __global float *C,
                                        const unsigned int count) {
     int gid = get_global_id(0);
-    if (gid >= count * count ) return;
+    if (gid >= count) return;
 
     int j, k;
 

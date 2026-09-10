@@ -157,7 +157,7 @@ int main(void) {
     check_error(err, "Failed to set kernel argument 3");
 
     /* Enqueue the kernel for execution */
-    size_t global_work_size = N * N; // This time the dimensionality is 1D
+    size_t global_work_size = N; // This time the dimensionality is 1D
     size_t local_work_size = 64; // Example local work size
 
     err = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &global_work_size, &local_work_size, 0, NULL, NULL);
