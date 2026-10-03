@@ -1,7 +1,7 @@
 /**
  * bench.c — implementazione della parte comune (F1, poi F3, F4, F6).
  *
- * Stato: passo 2 di B6 (F1, F2, F3, F4 nello stesso processo, F6).
+ * Stato: passo 3 di B6 (F1, F2, F3, F4 nel processo figlio, F6; F5 in bench_proc.c).
  * I riferimenti (A6, F1, RB-n, CA-n) puntano alla commissione.
  */
 
@@ -486,7 +486,7 @@ int bench_compare_float(const float *expected, const float *got, size_t n,
  * Controlla un descrittore prima di eseguire qualsiasi test (F2, casi di errore).
  * @return 1 se valido, 0 se no (reason compilato).
  */
-static int validate_test(const bench_test *const *tests, size_t index, char *reason, size_t len)
+int bench_validate_test(const bench_test *const *tests, size_t index, char *reason, size_t len)
 {
     const bench_test *t = tests[index];
 
@@ -742,7 +742,7 @@ typedef enum { TIMING_UNKNOWN, TIMING_PROFILING, TIMING_HOST } timing_mode;
 static measure_outcome measure_config(const bench_test *test, const bench_options *options,
                                       const bench_reporter *rep, cl_context context, cl_command_queue queue,
                                       cl_kernel kernel, cl_device_id device,
-                                      const bench_config *config, size_t config_index,
+                                      const bench_config *config,
                                       const char *device_label, timing_mode *timing)
 {
     bench_run run = {
@@ -773,12 +773,12 @@ static measure_outcome measure_config(const bench_test *test, const bench_option
 
     for (int r = 0; r < warmup + measured; r++) {
         cl_event event = NULL;
-        rep->run_start(rep->ctx, config_index);
+        rep->run_start(rep->ctx, config);
         double host_start = bench_clock_ns();
         cl_int err = clEnqueueNDRangeKernel(queue, kernel, test->work_dim, NULL,
                                             run.eff_size, run.local_size, 0, NULL, &event);
         if (err != CL_SUCCESS) {
-            rep->run_end(rep->ctx, config_index);
+            rep->run_end(rep->ctx, config);
             if (is_memory_error(err)) {
                 report_skip(rep, "memoria insufficiente (codice %d)", err);
                 goto done;
@@ -796,7 +796,7 @@ static measure_outcome measure_config(const bench_test *test, const bench_option
         if (err == CL_SUCCESS) {
             err = clGetEventInfo(event, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(status), &status, NULL);
         }
-        rep->run_end(rep->ctx, config_index);
+        rep->run_end(rep->ctx, config);
         if (err != CL_SUCCESS || status < 0) {
             /* Errore durante l'esecuzione (TDR, device perso): conta come TIMEOUT (RB-10, Q-26). */
             clReleaseEvent(event);
@@ -936,7 +936,7 @@ void bench_execute_pair(const bench_test *test, const bench_device *device,
 
     for (size_t c = 0; c < config_count; c++) {
         if (measure_config(test, options, rep, context, queue, kernel, device->device,
-                           &configs[c], c, device->label, &timing) == MEASURE_STOP) {
+                           &configs[c], device->label, &timing) == MEASURE_STOP) {
             break;
         }
     }
@@ -1097,11 +1097,11 @@ static void collector_configs(void *ctx, const bench_discard_summary *summary)
     }
 }
 
-static void collector_run_event(void *ctx, size_t config_index)
+static void collector_run_event(void *ctx, const bench_config *config)
 {
-    /* Nello stesso processo non serve: con F5 il padre misura qui il timeout. */
+    /* Il tempo massimo lo misura bench_supervise_pair sui messaggi del figlio. */
     (void)ctx;
-    (void)config_index;
+    (void)config;
 }
 
 static void collector_result(void *ctx, const bench_result *r)
@@ -1168,6 +1168,17 @@ static void collector_timeout_os(void *ctx, const bench_config *config)
     format_shape(shape, sizeof(shape), config->local, c->tests[c->current_test]->work_dim);
     printf("  [%s] %s  L=%s  TIMEOUT (fermato dal sistema operativo); configurazioni rimanenti saltate\n",
            current_label(c), c->tests[c->current_test]->name, shape);
+}
+
+static void collector_timeout(void *ctx, const bench_config *config, double limit_s)
+{
+    collector *c = ctx;
+    current_pair(c)->timeouts++;
+    char shape[64], limit[32];
+    format_shape(shape, sizeof(shape), config->local, c->tests[c->current_test]->work_dim);
+    format_decimal(limit, sizeof(limit), limit_s, 1);
+    printf("  [%s] %s  L=%s  TIMEOUT (oltre %s s); configurazioni rimanenti saltate\n",
+           current_label(c), c->tests[c->current_test]->name, shape, limit);
 }
 
 static void collector_skip(void *ctx, const char *reason)
@@ -1323,8 +1334,10 @@ int bench_main(int argc, char **argv,
                const bench_test *const *tests, size_t test_count,
                const bench_options *options)
 {
-    (void)argc;
-    (void)argv;   /* il ruolo di processo figlio arriva con F5 (passo 3 di B6) */
+    /* F5: lo stesso eseguibile, rilanciato con l'argomento interno, fa da processo figlio. */
+    if (bench_is_child(argc, argv)) {
+        return bench_child_main(argc, argv, tests, test_count, options);
+    }
 
     /* F1 */
     bench_device *devices = NULL;
@@ -1358,7 +1371,7 @@ int bench_main(int argc, char **argv,
 
     size_t valid_count = 0;
     for (size_t t = 0; t < test_count; t++) {
-        test_valid[t] = validate_test(tests, t, test_reasons[t], BENCH_REASON_MAX);
+        test_valid[t] = bench_validate_test(tests, t, test_reasons[t], BENCH_REASON_MAX);
         if (!test_valid[t]) {
             fprintf(stderr, "Test %zu (%s) escluso: %s\n", t,
                     tests[t] != NULL && tests[t]->name != NULL ? tests[t]->name : "senza nome",
@@ -1385,6 +1398,7 @@ int bench_main(int argc, char **argv,
         .result = collector_result,
         .discard = collector_discard,
         .timeout_os = collector_timeout_os,
+        .timeout = collector_timeout,
         .skip = collector_skip,
     };
 
@@ -1416,7 +1430,7 @@ int bench_main(int argc, char **argv,
             printf("\n== %s su %s (mediana di %d esecuzioni, solo esecuzione kernel) ==\n",
                    test->name, devices[d].label, options->measured_runs);
             fflush(stdout);
-            bench_execute_pair(test, &devices[d], options, &reporter);
+            bench_supervise_pair(t, test, &devices[d], options, &reporter);
             fflush(stdout);
         }
     }

@@ -8,6 +8,7 @@
 
 #include "tests.h"
 #include "bench/bench_elementwise.h"
+#include "test_selftest.h"
 
 #define KERNELS "minibanchmark/kernels/"
 #define REF_1D  (1u << 24)   /* 16.777.216 elementi (Q-31) */
@@ -37,6 +38,14 @@ const bench_test *const BENCH_TESTS[] = {
     &TEST_SUB,
     &TEST_MUL,
     &TEST_DIV,
+#ifdef BENCH_SELFTEST
+    &SELFTEST_TIMEOUT,
+    &SELFTEST_LOCALMEM,
+    &SELFTEST_CRASH,
+#endif
+#ifdef BENCH_SELFTEST_HANG
+    &SELFTEST_HANG,
+#endif
 };
 
 const size_t BENCH_TESTS_COUNT = sizeof(BENCH_TESTS) / sizeof(BENCH_TESTS[0]);

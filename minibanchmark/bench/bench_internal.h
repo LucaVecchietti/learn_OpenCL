@@ -53,11 +53,12 @@ typedef struct {
 typedef struct {
     void *ctx;
     void (*configs)(void *ctx, const bench_discard_summary *summary);
-    void (*run_start)(void *ctx, size_t config_index);
-    void (*run_end)(void *ctx, size_t config_index);
+    void (*run_start)(void *ctx, const bench_config *config);   /**< subito prima dell'enqueue */
+    void (*run_end)(void *ctx, const bench_config *config);     /**< subito dopo la fine dell'attesa */
     void (*result)(void *ctx, const bench_result *result);
     void (*discard)(void *ctx, const bench_config *config, const char *reason);  /**< rifiutata all'enqueue */
     void (*timeout_os)(void *ctx, const bench_config *config);                   /**< errore durante l'esecuzione */
+    void (*timeout)(void *ctx, const bench_config *config, double limit_s);      /**< tempo massimo superato (F5) */
     void (*skip)(void *ctx, const char *reason);                                  /**< test saltato su questo device */
 } bench_reporter;
 
@@ -71,6 +72,34 @@ int bench_configs_generate(const bench_test *test, const bench_device *device, c
                            bench_config **configs, size_t *count,
                            bench_discard_summary *summary,
                            char *skip_reason, size_t skip_reason_len);
+
+/**
+ * F2 — Controlla un descrittore (usato da padre e figlio).
+ * @return 1 se valido, 0 se no (reason compilato).
+ */
+int bench_validate_test(const bench_test *const *tests, size_t index, char *reason, size_t len);
+
+/* -------------------------------------------------------------------------
+ * F5 — bench_proc.c
+ * ------------------------------------------------------------------------- */
+
+/** Argomento interno che identifica il processo figlio. */
+#define BENCH_CHILD_ARG "--bench-child"
+
+/** 1 se il processo è stato lanciato come figlio (argv[1] == BENCH_CHILD_ARG). */
+int bench_is_child(int argc, char **argv);
+
+/** Corpo del processo figlio: esegue F4 per una coppia e scrive il protocollo su stdout. */
+int bench_child_main(int argc, char **argv,
+                     const bench_test *const *tests, size_t test_count,
+                     const bench_options *options);
+
+/**
+ * Padre: esegue una coppia test/device in un processo figlio, applicando il tempo massimo
+ * (RB-10) e il controllo di inattività (RB-12), e inoltra gli eventi al reporter.
+ */
+void bench_supervise_pair(size_t test_index, const bench_test *test, const bench_device *device,
+                          const bench_options *options, const bench_reporter *reporter);
 
 /** Orologio monotonico in ns (bench_proc.c: unica parte dipendente dal sistema operativo). */
 double bench_clock_ns(void);
