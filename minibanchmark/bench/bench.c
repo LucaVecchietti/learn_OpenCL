@@ -458,6 +458,19 @@ void bench_fill_random_float(float *dst, size_t n, uint32_t seed, float min, flo
     }
 }
 
+float bench_hash_float(uint32_t x, uint32_t y, uint32_t z, uint32_t seed, float min, float max)
+{
+    /* Combinazione delle coordinate + finalizzatore di murmur3: ben distribuito e senza stato. */
+    uint32_t h = seed ^ (x * 0x9E3779B1u) ^ (y * 0x85EBCA77u) ^ (z * 0xC2B2AE3Du);
+    h ^= h >> 16;
+    h *= 0x85EBCA6Bu;
+    h ^= h >> 13;
+    h *= 0xC2B2AE35u;
+    h ^= h >> 16;
+    float unit = (float)(h >> 8) * (1.0f / 16777216.0f);   /* [0, 1) */
+    return min + (max - min) * unit;
+}
+
 int bench_float_close(double expected, double got, double rel_tol, double abs_tol)
 {
     double diff = fabs(got - expected);

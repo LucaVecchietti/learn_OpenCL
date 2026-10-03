@@ -158,6 +158,12 @@ uint32_t bench_random_next(uint32_t *state);
 /** Riempie dst con n valori pseudo-casuali in [min, max), a partire da un seed fisso. */
 void bench_fill_random_float(float *dst, size_t n, uint32_t seed, float min, float max);
 
+/**
+ * Valore pseudo-casuale in [min, max) che dipende solo dalla posizione (x, y, z) e dal seed:
+ * lo stesso elemento ha lo stesso valore qualunque sia la dimensione effettiva (F9, F10).
+ */
+float bench_hash_float(uint32_t x, uint32_t y, uint32_t z, uint32_t seed, float min, float max);
+
 /** 1 se |got - expected| <= abs_tol + rel_tol * |expected| (NaN = diverso), 0 altrimenti. */
 int bench_float_close(double expected, double got, double rel_tol, double abs_tol);
 

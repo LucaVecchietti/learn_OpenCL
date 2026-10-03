@@ -8,6 +8,7 @@
 
 #include "tests.h"
 #include "bench/bench_elementwise.h"
+#include "test_kernels.h"
 #include "test_selftest.h"
 
 #define KERNELS "minibanchmark/kernels/"
@@ -38,6 +39,10 @@ const bench_test *const BENCH_TESTS[] = {
     &TEST_SUB,
     &TEST_MUL,
     &TEST_DIV,
+    &TEST_MAX,
+    &TEST_MMUL,
+    &TEST_MMUL_TILED,
+    &TEST_STENCIL3D,
 #ifdef BENCH_SELFTEST
     &SELFTEST_TIMEOUT,
     &SELFTEST_LOCALMEM,
