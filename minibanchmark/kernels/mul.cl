@@ -1,18 +1,18 @@
 /**
- * Test 1D elemento per elemento: C[i] = A[i] + B[i] (somma).
+ * Test 1D elemento per elemento: C[i] = A[i] * B[i] (prodotto).
  *
  * @param A Primo array di input.
  * @param B Secondo array di input.
  * @param C Array di output.
  * @param n Numero di elementi (dimensione effettiva).
  */
-__kernel void add(__global const float *A,
+__kernel void mul(__global const float *A,
                   __global const float *B,
                   __global float *C,
                   const unsigned int n)
 {
     size_t i = get_global_id(0);
     if (i < n) {
-        C[i] = A[i] + B[i];
+        C[i] = A[i] * B[i];
     }
 }

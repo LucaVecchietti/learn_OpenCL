@@ -23,6 +23,14 @@
 #include <CL/cl.h>
 
 #include <stddef.h>
+#include <stdint.h>
+
+/** Codici di ritorno della parte comune e delle funzioni dei test (B2: errori come codici negativi). */
+enum {
+    BENCH_OK         =  0,
+    BENCH_ERR        = -1,   /**< errore generico (già segnalato su stderr da chi lo rileva) */
+    BENCH_ERR_MEMORY = -2    /**< memoria insufficiente su host o device (RB-7) */
+};
 
 /* =========================================================================
  * F1 — Scoperta piattaforme e device
@@ -79,7 +87,7 @@ void bench_devices_print(const bench_device *devices, size_t count);
 void bench_devices_free(bench_device *devices);
 
 /* =========================================================================
- * F2 — Modello di test (contratto; implementazione al passo 2 di B6)
+ * F2 — Modello di test
  * ========================================================================= */
 
 typedef enum {
@@ -106,6 +114,7 @@ typedef struct {
     cl_uint          work_dim;
     size_t           eff_size[3];    /**< dimensione effettiva (RB-11) */
     size_t           local_size[3];  /**< work-group della configurazione */
+    const void      *user;           /**< copia di bench_test.user */
     void            *state;          /**< di proprietà del test: creato in setup, liberato in teardown */
 } bench_run;
 
@@ -129,6 +138,35 @@ struct bench_test {
     double (*flop)(const size_t eff_size[3]);
     void   (*teardown)(bench_run *run);
 };
+
+/* -------------------------------------------------------------------------
+ * F2 — Helper per i test
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Crea un buffer nel context della configurazione.
+ * @return BENCH_OK, BENCH_ERR_MEMORY (memoria insufficiente) o BENCH_ERR (segnalato su stderr).
+ */
+int bench_buffer_create(bench_run *run, cl_mem_flags flags, size_t bytes, void *host_ptr, cl_mem *out);
+
+/** Lettura bloccante di un buffer del device in memoria host. Stessi codici di bench_buffer_create. */
+int bench_buffer_read(bench_run *run, cl_mem mem, size_t bytes, void *dst);
+
+/** Generatore pseudo-casuale xorshift32: stessa sequenza a parità di seed (risultati ripetibili). */
+uint32_t bench_random_next(uint32_t *state);
+
+/** Riempie dst con n valori pseudo-casuali in [min, max), a partire da un seed fisso. */
+void bench_fill_random_float(float *dst, size_t n, uint32_t seed, float min, float max);
+
+/** 1 se |got - expected| <= abs_tol + rel_tol * |expected| (NaN = diverso), 0 altrimenti. */
+int bench_float_close(double expected, double got, double rel_tol, double abs_tol);
+
+/**
+ * Confronta due array e riporta il primo elemento diverso (RB-5).
+ * @return 0 se uguali entro le tolleranze, 1 se diversi (mismatch compilato).
+ */
+int bench_compare_float(const float *expected, const float *got, size_t n,
+                        double rel_tol, double abs_tol, bench_mismatch *mismatch);
 
 /** Opzioni globali (impostate nel main). */
 typedef struct {
