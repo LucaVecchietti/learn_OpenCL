@@ -508,6 +508,9 @@ void bench_supervise_pair(size_t test_index, const bench_test *test, const bench
     double inactivity_ns = options->inactivity_s * 1e9;
 
     int done = 0, killed = 0, in_run = 0;
+    /* Fase raggiunta dal figlio, per spiegare un'uscita anomala (es. driver che va in crash
+     * compilando un sorgente con errori: succede con OpenCLOn12). */
+    const char *phase = "all'avvio";
     bench_config running;
     memset(&running, 0, sizeof(running));
     double run_started = 0.0;
@@ -548,6 +551,7 @@ void bench_supervise_pair(size_t test_index, const bench_test *test, const bench
         } else if (strcmp(kind, "RUN_END") == 0) {
             in_run = 0;
         } else if (strcmp(kind, "DEVICE") == 0 && n >= 2) {
+            phase = "durante la compilazione del kernel";
             if (strcmp(f[1], device->label) != 0) {
                 child_kill(&child);
                 killed = 1;
@@ -576,6 +580,7 @@ void bench_supervise_pair(size_t test_index, const bench_test *test, const bench
                 pending = count < pending ? pending - count : 0;
             }
             last_message = bench_clock_ns();
+            phase = "durante preparazione, misura o verifica";
             rep->configs(rep->ctx, &summary);
         } else if (strcmp(kind, "RESULT") == 0 && n >= 16) {
             bench_result r;
@@ -612,7 +617,7 @@ void bench_supervise_pair(size_t test_index, const bench_test *test, const bench
 
     unsigned long code = child_wait(&child);
     if (!done && !killed) {
-        snprintf(reason, sizeof(reason), "processo terminato in modo anomalo (codice 0x%lX)", code);
+        snprintf(reason, sizeof(reason), "processo terminato in modo anomalo %s (codice 0x%lX)", phase, code);
         rep->skip(rep->ctx, reason);
     }
 }
