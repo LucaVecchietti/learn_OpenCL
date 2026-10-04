@@ -5,9 +5,9 @@
 | Nome | Refactor minibanchmark |
 | Progetto | learn_OpenCL |
 | Data apertura | 2026-10-03 |
-| Stato | Pronta per lo sviluppo |
+| Stato | Implementata (Windows; verifica Linux rimandata, Q-18) |
 | Taglia | L (implementazione): struttura nuova per test con geometrie e argomenti propri (1D/2D/3D), parte comune portabile su Windows e Linux, otto test |
-| Revisione | 11 |
+| Revisione | 12 |
 
 > Un campo che non si applica va compilato con "N/A": un campo vuoto è ambiguo, "N/A" è una
 > risposta. Quello che non è ancora deciso non si riempie con un'ipotesi: va in
@@ -883,7 +883,8 @@ Su Linux lo stesso comando con `-o minibenchmark` e la libreria OpenCL di sistem
 ### B4. Rischi e punti di attenzione
 - **Buffer di `stdout` nel figlio su Windows:** in una pipe il CRT bufferizza a blocchi anche con `_IOLBF`; serve `fflush` esplicito dopo ogni messaggio, altrimenti il padre vede `RUN_START` in ritardo e il timeout scatta per errore.
 - **TDR della GPU (~2 s):** un kernel lungo viene interrotto dal sistema; le dimensioni dei test sono scelte per restare sotto. Non modificare `TdrDelay` nel registro.
-- **Durata complessiva:** sul device CPU software `stencil3d` (~130 forme) e `mmul` (~30) possono richiedere diversi minuti; stima complessiva 10–15 minuti. Se troppo, le dimensioni di riferimento si cambiano aggiornando la commissione.
+- **Durata complessiva:** misurata circa 20 minuti con 4 device (AMD gfx1032, OpenCLOn12 RX 6600 XT e Basic Render Driver, Intel i7-11700K), 1621 configurazioni. Il grosso del tempo è `mmul` sul device CPU software (~1 s per esecuzione, 45 forme) e `stencil3d` su Intel (371 forme). Se troppo, le dimensioni di riferimento si cambiano aggiornando la commissione.
+- **CA-7 su OpenCLOn12:** il driver va in crash dentro `clBuildProgram` quando il sorgente ha errori di sintassi (riprodotto anche fuori dal benchmark). L'isolamento nei processi figli lo contiene: il test è saltato con "processo terminato in modo anomalo durante la compilazione del kernel", ma il log di compilazione su quei device non è disponibile. Su AMD e Intel CA-7 è verificato.
 - **OpenCLOn12:** strato di traduzione su D3D12. Verificato: i timestamp di profiling sono circa 1000 volte troppo piccoli (difetto del driver), gestito dalla calibrazione di RB-3 (il primo controllo, basato sulla durata del kernel del test, sbagliava con kernel sotto 0,5 ms); local memory 32 KB, max alloc 1 GB. Le tolleranze potrebbero richiedere aggiustamenti [D].
 - **Dopo la terminazione di un figlio sulla GPU** il driver può impiegare qualche istante a liberare il device: il figlio successivo potrebbe fallire nella creazione del context (errore per quella coppia, nessun blocco).
 - **`CL_KERNEL_WORK_GROUP_SIZE`** può essere minore del massimo del device per kernel con molti registri (`mmul_tiled`): F3 lo usa già come limite.
