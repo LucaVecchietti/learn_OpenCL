@@ -739,24 +739,114 @@ static int compare_double(const void *a, const void *b)
 
 typedef enum { MEASURE_CONTINUE, MEASURE_STOP } measure_outcome;
 
-/*
- * Controllo di plausibilità del profiling (RB-3, Q-40): alcuni driver (OpenCLOn12) restituiscono
- * timestamp errati. Si decide una volta per coppia test/device alla prima esecuzione misurata:
- * se l'host misura almeno PLAUSIBILITY_MIN_HOST_NS e il profiling è meno di 1/PLAUSIBILITY_RATIO
- * del tempo host, il profiling è inaffidabile e si usa il tempo host (enqueue → fine attesa).
- * Sotto la soglia di tempo host l'overhead domina e il confronto non è significativo.
- */
-#define PLAUSIBILITY_RATIO       50.0
-#define PLAUSIBILITY_MIN_HOST_NS 500000.0   /* 0,5 ms */
+typedef enum { TIMING_PROFILING, TIMING_HOST } timing_mode;
 
-typedef enum { TIMING_UNKNOWN, TIMING_PROFILING, TIMING_HOST } timing_mode;
+/*
+ * Calibrazione del profiling (RB-3, Q-40): alcuni driver (OpenCLOn12) restituiscono timestamp
+ * errati. All'inizio di ogni coppia test/device si esegue un kernel interno raddoppiando il lavoro
+ * finché l'host misura almeno CALIBRATION_TARGET_NS: a quella durata l'overhead dell'host è
+ * trascurabile, quindi un profiling sotto 1/CALIBRATION_RATIO del tempo host è inaffidabile e per
+ * il device si usa il tempo host (enqueue → fine attesa). L'esito non dipende dal kernel del test.
+ */
+#define CALIBRATION_TARGET_NS   2000000.0    /* 2 ms */
+#define CALIBRATION_LIMIT_NS    500000000.0  /* oltre 0,5 s si rinuncia */
+#define CALIBRATION_RATIO       10.0
+#define CALIBRATION_GLOBAL_SIZE 1024
+
+static const char *CALIBRATION_SOURCE =
+    "__kernel void bench_calibrate(__global float *out, const unsigned int iterations)\n"
+    "{\n"
+    "    float x = (float)get_global_id(0);\n"
+    "    for (unsigned int i = 0; i < iterations; i++) {\n"
+    "        x = x * 0.9999999f + 0.5f;\n"
+    "    }\n"
+    "    out[get_global_id(0)] = x;\n"
+    "}\n";
+
+/* Esegue il kernel di calibrazione una volta. @return 0 se riuscito (tempi in ns). */
+static int calibration_run(cl_command_queue queue, cl_kernel kernel, cl_uint iterations,
+                           double *host_ns, double *profiling_ns)
+{
+    size_t global = CALIBRATION_GLOBAL_SIZE;
+    cl_event event = NULL;
+    if (clSetKernelArg(kernel, 1, sizeof(cl_uint), &iterations) != CL_SUCCESS) {
+        return -1;
+    }
+    double start_host = bench_clock_ns();
+    if (clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &global, NULL, 0, NULL, &event) != CL_SUCCESS) {
+        return -1;
+    }
+    cl_int err = clWaitForEvents(1, &event);
+    *host_ns = bench_clock_ns() - start_host;
+
+    cl_ulong start = 0, end = 0;
+    if (err == CL_SUCCESS) err = clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(start), &start, NULL);
+    if (err == CL_SUCCESS) err = clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(end), &end, NULL);
+    clReleaseEvent(event);
+    *profiling_ns = (double)(end - start);
+    return err == CL_SUCCESS ? 0 : -1;
+}
+
+/*
+ * Decide se il profiling del device è affidabile. Se la calibrazione non si può eseguire
+ * o non raggiunge la durata richiesta, si tiene il profiling (con un avviso).
+ */
+static timing_mode calibrate_timing(cl_context context, cl_command_queue queue, const bench_device *device)
+{
+    timing_mode mode = TIMING_PROFILING;
+    cl_program program = NULL;
+    cl_kernel kernel = NULL;
+    cl_mem out = NULL;
+    cl_int err;
+
+    program = clCreateProgramWithSource(context, 1, &CALIBRATION_SOURCE, NULL, &err);
+    if (err == CL_SUCCESS) err = clBuildProgram(program, 1, &device->device, NULL, NULL, NULL);
+    if (err == CL_SUCCESS) kernel = clCreateKernel(program, "bench_calibrate", &err);
+    if (err == CL_SUCCESS) out = clCreateBuffer(context, CL_MEM_WRITE_ONLY, CALIBRATION_GLOBAL_SIZE * sizeof(float), NULL, &err);
+    if (err == CL_SUCCESS) err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &out);
+    if (err != CL_SUCCESS) {
+        fprintf(stderr, "Avviso: %s: calibrazione del profiling non eseguibile (codice %d), uso il profiling\n",
+                device->label, err);
+        goto cleanup;
+    }
+
+    double host_ns = 0.0, profiling_ns = 0.0;
+    if (calibration_run(queue, kernel, 1, &host_ns, &profiling_ns) != 0) {   /* a vuoto: primo lancio */
+        fprintf(stderr, "Avviso: %s: calibrazione del profiling fallita, uso il profiling\n", device->label);
+        goto cleanup;
+    }
+    for (cl_uint iterations = 1024; ; iterations *= 2) {
+        if (calibration_run(queue, kernel, iterations, &host_ns, &profiling_ns) != 0) {
+            fprintf(stderr, "Avviso: %s: calibrazione del profiling fallita, uso il profiling\n", device->label);
+            goto cleanup;
+        }
+        if (host_ns >= CALIBRATION_TARGET_NS) {
+            break;
+        }
+        if (host_ns >= CALIBRATION_LIMIT_NS || iterations >= (1u << 30)) {
+            fprintf(stderr, "Avviso: %s: calibrazione del profiling incompleta, uso il profiling\n", device->label);
+            goto cleanup;
+        }
+    }
+
+    if (profiling_ns * CALIBRATION_RATIO < host_ns) {
+        mode = TIMING_HOST;
+        fprintf(stderr, "Avviso: %s: profiling inaffidabile (calibrazione: %.4f ms contro %.4f ms misurati "
+                "dall'host), uso il tempo host\n", device->label, profiling_ns / 1e6, host_ns / 1e6);
+    }
+
+cleanup:
+    if (out != NULL)     clReleaseMemObject(out);
+    if (kernel != NULL)  clReleaseKernel(kernel);
+    if (program != NULL) clReleaseProgram(program);
+    return mode;
+}
 
 /* Misura una configurazione: setup, 1 a vuoto + N misurate, mediana, verifica, teardown (F4 punto 5). */
 static measure_outcome measure_config(const bench_test *test, const bench_options *options,
                                       const bench_reporter *rep, cl_context context, cl_command_queue queue,
                                       cl_kernel kernel, cl_device_id device,
-                                      const bench_config *config,
-                                      const char *device_label, timing_mode *timing)
+                                      const bench_config *config, timing_mode timing)
 {
     bench_run run = {
         .context = context, .queue = queue, .kernel = kernel, .device = device,
@@ -827,21 +917,8 @@ static measure_outcome measure_config(const bench_test *test, const bench_option
             report_skip(rep, "profiling non disponibile (codice %d)", err);
             goto done;
         }
-        double profiling_ns = (double)(end - start);
-
-        /* Si decide alla prima esecuzione misurata: in quella a vuoto il tempo host include
-         * il trasferimento iniziale dei buffer e falserebbe il confronto. */
-        if (*timing == TIMING_UNKNOWN && r >= warmup) {
-            if (host_ns >= PLAUSIBILITY_MIN_HOST_NS && profiling_ns * PLAUSIBILITY_RATIO < host_ns) {
-                *timing = TIMING_HOST;
-                fprintf(stderr, "Avviso: %s: profiling inaffidabile (%.4f ms contro %.4f ms misurati dall'host), "
-                        "uso il tempo host\n", device_label, profiling_ns / 1e6, host_ns / 1e6);
-            } else {
-                *timing = TIMING_PROFILING;
-            }
-        }
         if (r >= warmup) {
-            times[r - warmup] = (*timing == TIMING_HOST) ? host_ns : profiling_ns;
+            times[r - warmup] = (timing == TIMING_HOST) ? host_ns : (double)(end - start);
         }
         clReleaseEvent(event);
     }
@@ -857,7 +934,7 @@ static measure_outcome measure_config(const bench_test *test, const bench_option
         .median_ns = median,
         .flop = test->flop(run.eff_size),
         .status = BENCH_STATUS_OK,
-        .host_timing = (*timing == TIMING_HOST),
+        .host_timing = (timing == TIMING_HOST),
     };
     memcpy(result.local, config->local, sizeof(result.local));
     memcpy(result.eff, config->eff, sizeof(result.eff));
@@ -889,7 +966,7 @@ void bench_execute_pair(const bench_test *test, const bench_device *device,
     char *source = NULL;
     bench_config *configs = NULL;
     size_t config_count = 0;
-    timing_mode timing = TIMING_UNKNOWN;
+    timing_mode timing = TIMING_PROFILING;
     cl_int err;
 
     context =clCreateContext(NULL, 1, &device->device, NULL, NULL, &err);
@@ -909,6 +986,8 @@ void bench_execute_pair(const bench_test *test, const bench_device *device,
         report_skip(rep, "creazione della command queue fallita (codice %d)", err);
         goto cleanup;
     }
+
+    timing = calibrate_timing(context, queue, device);
 
     size_t source_length = 0;
     source = read_text_file(test->source_path, &source_length);
@@ -949,7 +1028,7 @@ void bench_execute_pair(const bench_test *test, const bench_device *device,
 
     for (size_t c = 0; c < config_count; c++) {
         if (measure_config(test, options, rep, context, queue, kernel, device->device,
-                           &configs[c], device->label, &timing) == MEASURE_STOP) {
+                           &configs[c], timing) == MEASURE_STOP) {
             break;
         }
     }

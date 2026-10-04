@@ -7,7 +7,7 @@
 | Data apertura | 2026-10-03 |
 | Stato | Pronta per lo sviluppo |
 | Taglia | L (implementazione): struttura nuova per test con geometrie e argomenti propri (1D/2D/3D), parte comune portabile su Windows e Linux, otto test |
-| Revisione | 10 |
+| Revisione | 11 |
 
 > Un campo che non si applica va compilato con "N/A": un campo vuoto è ambiguo, "N/A" è una
 > risposta. Quello che non è ancora deciso non si riempie con un'ipotesi: va in
@@ -92,7 +92,7 @@
 ### A5. Regole di business
 - **RB-1:** ogni test registrato viene eseguito su ogni device di ogni piattaforma.
 - **RB-2:** per ogni coppia test/device il benchmark genera automaticamente le configurazioni di work-group dalle caratteristiche del device e del kernel: parte dalla dimensione minima (multiplo preferito del kernel sul device) e prova tutti i multipli fino al massimo ammesso. In 2D e 3D prova le forme (X×Y, X×Y×Z) in cui ogni lato è una potenza di 2, il prodotto è un multiplo della dimensione minima e non supera il massimo, e che rispettano i limiti per dimensione del device. Il test non elenca configurazioni, ma può dichiarare un vincolo di forma (es. "solo quadrate") che il benchmark rispetta. Le configurazioni che richiedono più local memory di quella del device sono scartate; le configurazioni scartate sono riportate raggruppate per motivo, con il loro numero.
-- **RB-3:** il tempo misurato è solo quello di esecuzione del kernel sul device (esclusi trasferimenti, compilazione, preparazione dei dati). Eccezione: se per un device il tempo del profiling non è plausibile (meno di 1/50 del tempo misurato dall'host, con tempo host di almeno 0,5 ms), per quel device si usa il tempo misurato dall'host (dall'invio alla fine dell'esecuzione) e le misure riportano la nota "tempo host: profiling inaffidabile".
+- **RB-3:** il tempo misurato è solo quello di esecuzione del kernel sul device (esclusi trasferimenti, compilazione, preparazione dei dati). Eccezione: se il profiling di un device non è affidabile, per quel device si usa il tempo misurato dall'host (dall'invio alla fine dell'esecuzione) e le misure riportano la nota "tempo host: profiling inaffidabile". L'affidabilità si stabilisce all'inizio di ogni test su ogni device con una calibrazione: un kernel interno di almeno 2 ms misurati dall'host; se il profiling misura meno di 1/10 del tempo host, è inaffidabile.
 - **RB-4:** ogni configurazione viene eseguita 1 volta a vuoto e poi 5 volte misurate; il tempo riportato è la mediana.
 - **RB-5:** una misura è valida solo se l'output corrisponde al risultato atteso calcolato sull'host (con tolleranza sui float); una misura con risultato errato è segnata **ERRATO** e non entra nel riepilogo.
 - **RB-6:** ogni test dichiara quante operazioni in virgola mobile (FLOP) esegue per una data dimensione effettiva; per ogni misura si calcolano i FLOPS (FLOP / tempo). La configurazione migliore di un test su un device è quella con i FLOPS più alti tra le misure valide; il device migliore per un test è quello con la configurazione migliore a FLOPS più alti. Il riepilogo mostra anche tempo, dati elaborati e percentuale scartata.
@@ -463,7 +463,7 @@ Una riga su `stdout` per configurazione, stampata dal padre (es. `[AMD / gfx1032
 **Dati scritti/aggiornati sul DB:** N/A.
 
 #### Regole di business applicate
-- RB-3: solo l'intervallo di profiling del kernel; controllo di plausibilità alla prima esecuzione misurata di ogni coppia (profiling < 1/50 del tempo host con tempo host ≥ 0,5 ms → tempo host per tutta la coppia, avviso su `stderr`, nota nelle righe e nel riepilogo) [P]; orologio monotonico `bench_clock_ns()` in `bench_proc.c` [P]. RB-4: 1 + 5, mediana. RB-5: verifica a ogni configurazione. RB-7: memoria → saltato. RB-10: errore in esecuzione = TIMEOUT. RB-11: buffer della dimensione effettiva.
+- RB-3: solo l'intervallo di profiling del kernel; calibrazione all'inizio di ogni coppia con un kernel interno (`bench_calibrate`), raddoppiando il lavoro finché l'host misura ≥ 2 ms; profiling < 1/10 del tempo host → tempo host per tutta la coppia, avviso su `stderr`, nota nelle righe e nel riepilogo; calibrazione non eseguibile → profiling con avviso [P]; orologio monotonico `bench_clock_ns()` in `bench_proc.c` [P]. RB-4: 1 + 5, mediana. RB-5: verifica a ogni configurazione. RB-7: memoria → saltato. RB-10: errore in esecuzione = TIMEOUT. RB-11: buffer della dimensione effettiva.
 
 #### Casi limite e assunzioni
 - **Casi limite da gestire:** kernel vicini alla risoluzione del timer (mediana stampata comunque); `teardown` dopo `setup` parziale.
@@ -884,7 +884,7 @@ Su Linux lo stesso comando con `-o minibenchmark` e la libreria OpenCL di sistem
 - **Buffer di `stdout` nel figlio su Windows:** in una pipe il CRT bufferizza a blocchi anche con `_IOLBF`; serve `fflush` esplicito dopo ogni messaggio, altrimenti il padre vede `RUN_START` in ritardo e il timeout scatta per errore.
 - **TDR della GPU (~2 s):** un kernel lungo viene interrotto dal sistema; le dimensioni dei test sono scelte per restare sotto. Non modificare `TdrDelay` nel registro.
 - **Durata complessiva:** sul device CPU software `stencil3d` (~130 forme) e `mmul` (~30) possono richiedere diversi minuti; stima complessiva 10–15 minuti. Se troppo, le dimensioni di riferimento si cambiano aggiornando la commissione.
-- **OpenCLOn12:** strato di traduzione su D3D12. Verificato: i timestamp di profiling sono circa 1000 volte troppo piccoli (difetto del driver), gestito dal controllo di plausibilità di RB-3; local memory 32 KB, max alloc 1 GB. Le tolleranze potrebbero richiedere aggiustamenti [D].
+- **OpenCLOn12:** strato di traduzione su D3D12. Verificato: i timestamp di profiling sono circa 1000 volte troppo piccoli (difetto del driver), gestito dalla calibrazione di RB-3 (il primo controllo, basato sulla durata del kernel del test, sbagliava con kernel sotto 0,5 ms); local memory 32 KB, max alloc 1 GB. Le tolleranze potrebbero richiedere aggiustamenti [D].
 - **Dopo la terminazione di un figlio sulla GPU** il driver può impiegare qualche istante a liberare il device: il figlio successivo potrebbe fallire nella creazione del context (errore per quella coppia, nessun blocco).
 - **`CL_KERNEL_WORK_GROUP_SIZE`** può essere minore del massimo del device per kernel con molti registri (`mmul_tiled`): F3 lo usa già come limite.
 - **Indici a 32 bit** nei kernel: nessun overflow con le dimensioni scelte, ma i controlli in `setup` vanno mantenuti.
@@ -951,4 +951,4 @@ Su Linux lo stesso comando con `-o minibenchmark` e la libreria OpenCL di sistem
 | Q-37 | Dove sta il test di prova del blocco (CA-21)? | B | io | no | chiusa | Opzione separata `-DBENCH_SELFTEST_HANG` |
 | Q-38 | Architettura dei test (B0)? | B | io | sì | chiusa | Alternativa A: descrittore + funzioni del test, con helper |
 | Q-39 | Piano di rilascio? | B | io | no | chiusa | Branch `refactor-minibanchmark`, commit 0 del prototipo attuale, passi 1–6 di B6 |
-| Q-40 | Profiling inaffidabile (OpenCLOn12 restituisce tempi 1000 volte troppo piccoli): come si misura? | B→A | io | sì | chiusa | Controllo di plausibilità generico: se il profiling è < 1/50 del tempo host si usa il tempo host, con nota (rev. 10, RB-3) |
+| Q-40 | Profiling inaffidabile (OpenCLOn12 restituisce tempi 1000 volte troppo piccoli): come si misura? | B→A | io | sì | chiusa | Rev. 10: controllo sulla durata del kernel del test (< 1/50 del tempo host). Rev. 11: sostituito da una calibrazione per device con un kernel interno di ≥ 2 ms (soglia 1/10), perché il primo controllo falliva con kernel brevi |
